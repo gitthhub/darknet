@@ -194,7 +194,9 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
     demo_thresh = thresh;
     demo_hier = hier;
     printf("Demo\n");
+    // 根据cfg文件配置网络，并加载网络权重
     net = load_network(cfgfile, weightfile, 0);
+    // 设置batch大小
     set_batch_network(net, 1);
     pthread_t detect_thread;
     pthread_t fetch_thread;
@@ -209,6 +211,7 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
     }
     avg = calloc(demo_total, sizeof(float));
 
+    // 读取视频流并进行检测
     if(filename){
         printf("video file: %s\n", filename);
         cap = open_video_stream(filename, 0, 0, 0, 0);
@@ -310,7 +313,7 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
 
    int count = 0;
    if(!prefix){
-   cvNamedWindow("Demo", CV_WINDOW_NORMAL); 
+   cvNamedWindow("Demo", CV_WINDOW_NORMAL);
    if(fullscreen){
    cvSetWindowProperty("Demo", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
    } else {
@@ -346,4 +349,3 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
     fprintf(stderr, "Demo needs OpenCV for webcam images.\n");
 }
 #endif
-

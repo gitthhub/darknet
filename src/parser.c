@@ -739,8 +739,10 @@ int is_network(section *s)
             || strcmp(s->type, "[network]")==0);
 }
 
+// 该函数是具体的解析网络cfg文件的函数！！
 network *parse_network_cfg(char *filename)
 {
+    // 以链表的形式存储网络的各个层
     list *sections = read_cfg(filename);
     node *n = sections->front;
     if(!n) error("Config file has no sections");
@@ -766,6 +768,7 @@ network *parse_network_cfg(char *filename)
     int count = 0;
     free_section(s);
     fprintf(stderr, "layer     filters    size              input                output\n");
+    // 读取链表  逐层配置网络
     while(n){
         params.index = count;
         fprintf(stderr, "%5d ", count);
@@ -1309,4 +1312,3 @@ void load_weights(network *net, char *filename)
 {
     load_weights_upto(net, filename, 0, net->n);
 }
-

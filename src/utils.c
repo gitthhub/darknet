@@ -164,10 +164,10 @@ char *find_char_arg(int argc, char **argv, char *arg, char *def)
 {
     int i;
     for(i = 0; i < argc-1; ++i){
-        if(!argv[i]) continue;
-        if(0==strcmp(argv[i], arg)){
-            def = argv[i+1];
-            del_arg(argc, argv, i);
+        if(!argv[i]) continue;         // 忽略掉已删除字段
+        if(0==strcmp(argv[i], arg)){   // =0 两字符串相等  即匹配到相应的命令字段
+            def = argv[i+1];           // 此时 将该命令字段后面的具体变量赋值给def
+            del_arg(argc, argv, i);    // 同时删除该命令字段和对应变量（整体左移并赋值为0）
             del_arg(argc, argv, i);
             break;
         }
@@ -175,7 +175,8 @@ char *find_char_arg(int argc, char **argv, char *arg, char *def)
     return def;
 }
 
-
+// 解析的不是.cfg文件，而是路径地址
+// 最终返回的是cfg文件名，如 yolo.cfg
 char *basecfg(char *cfgfile)
 {
     char *c = cfgfile;
@@ -262,9 +263,9 @@ unsigned char *read_file(char *filename)
     FILE *fp = fopen(filename, "rb");
     size_t size;
 
-    fseek(fp, 0, SEEK_END); 
+    fseek(fp, 0, SEEK_END);
     size = ftell(fp);
-    fseek(fp, 0, SEEK_SET); 
+    fseek(fp, 0, SEEK_SET);
 
     unsigned char *text = calloc(size+1, sizeof(char));
     fread(text, 1, size, fp);
@@ -576,7 +577,7 @@ float mag_array(float *a, int n)
     int i;
     float sum = 0;
     for(i = 0; i < n; ++i){
-        sum += a[i]*a[i];   
+        sum += a[i]*a[i];
     }
     return sqrt(sum);
 }
@@ -685,7 +686,7 @@ float rand_normal()
 
 size_t rand_size_t()
 {
-    return  ((size_t)(rand()&0xff) << 56) | 
+    return  ((size_t)(rand()&0xff) << 56) |
         ((size_t)(rand()&0xff) << 48) |
         ((size_t)(rand()&0xff) << 40) |
         ((size_t)(rand()&0xff) << 32) |
@@ -723,4 +724,3 @@ float **one_hot_encode(float *a, int n, int k)
     }
     return t;
 }
-
