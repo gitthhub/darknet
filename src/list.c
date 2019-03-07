@@ -2,6 +2,7 @@
 #include <string.h>
 #include "list.h"
 
+// 申请一个节点，并返回当前节点的指针
 list *make_list()
 {
 	list *l = malloc(sizeof(list));
@@ -33,7 +34,7 @@ void *list_pop(list *l){
     if(l->back) l->back->next = 0;
     free(b);
     --l->size;
-    
+
     return val;
 }
 

@@ -10,10 +10,12 @@ list *read_data_cfg(char *filename)
     if(file == 0) file_error(filename);
     char *line;
     int nu = 0;
+    // 注册一个链表
+    // 该链表每个节点存储.data文件中相应的配置(key, value)
     list *options = make_list();
     while((line=fgetl(file)) != 0){
         ++ nu;
-        strip(line);
+        strip(line);    // 删除当前行？
         switch(line[0]){
             case '\0':
             case '#':
@@ -48,7 +50,7 @@ metadata get_metadata(char *file)
     free_list(options);
     return m;
 }
-
+//read_option(line, current->options))
 int read_option(char *s, list *options)
 {
     size_t i;
@@ -56,6 +58,8 @@ int read_option(char *s, list *options)
     char *val = 0;
     for(i = 0; i < len; ++i){
         if(s[i] == '='){
+            // 等号替换为空字符  表示字符串到此结束
+            // 因此s中(即key)中存储的就是关键字
             s[i] = '\0';
             val = s+i+1;
             break;
@@ -97,6 +101,7 @@ char *option_find(list *l, char *key)
             p->used = 1;
             return p->val;
         }
+        // 这里说明，若一个参数设置多次，则只有最后一个起作用
         n = n->next;
     }
     return 0;

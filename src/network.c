@@ -51,13 +51,16 @@ load_args get_base_args(network *net)
 }
 
 // 加载网络：
-//    读取.cfg网络配置文件并赋值给network结构体
+//    读取.cfg网络配置文件并实际构建网络
 //    给网络加载权重参数
+// clear: ???
 network *load_network(char *cfg, char *weights, int clear)
 {
     // 解析网络参数和各层的具体配置
+    // 根据配置实际构建各层
     network *net = parse_network_cfg(cfg);
     if(weights && weights[0] != 0){
+        // 逐层加载网络参数(也可以指定只加载某些层)
         load_weights(net, weights);
     }
     if(clear) (*net->seen) = 0;
@@ -292,11 +295,13 @@ void backward_network(network *netp)
 
 float train_network_datum(network *net)
 {
+    // seen参数每次增加一个batch
     *net->seen += net->batch;
     net->train = 1;
     forward_network(net);
-    backward_network(net);
+    backward_network(net);           // 反向传播的时候没有更新权重？？
     float error = *net->cost;
+    // 当 seen = batch * subdivisions 时， 更新网络
     if(((*net->seen)/net->batch)%net->subdivisions == 0) update_network(net);
     return error;
 }
@@ -319,11 +324,12 @@ float train_network(network *net, data d)
 {
     assert(d.X.rows % net->batch == 0);
     int batch = net->batch;
-    int n = d.X.rows / batch;
+    int n = d.X.rows / batch;   // 需要研究如何读取图像数据
 
     int i;
     float sum = 0;
     for(i = 0; i < n; ++i){
+        // 与sgd区别
         get_next_batch(d, batch, i*batch, net->input, net->truth);
         float err = train_network_datum(net);
         sum += err;

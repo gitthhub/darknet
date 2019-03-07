@@ -259,7 +259,7 @@ struct layer{
 
     float * m;
     float * v;
-    
+
     float * bias_m;
     float * bias_v;
     float * scale_m;
@@ -284,7 +284,7 @@ struct layer{
     float *g_cpu;
     float *o_cpu;
     float *c_cpu;
-    float *dc_cpu; 
+    float *dc_cpu;
 
     float * binary_input;
 
@@ -311,7 +311,7 @@ struct layer{
 
     struct layer *input_h_layer;
     struct layer *state_h_layer;
-	
+
     struct layer *wz;
     struct layer *uz;
     struct layer *wr;
@@ -351,7 +351,7 @@ struct layer{
     float *g_gpu;
     float *o_gpu;
     float *c_gpu;
-    float *dc_gpu; 
+    float *dc_gpu;
 
     float *m_gpu;
     float *v_gpu;
@@ -430,7 +430,7 @@ typedef enum {
 typedef struct network{
     int n;
     int batch;
-    size_t *seen;
+    size_t *seen;    // ?
     int *t;
     float epoch;
     int subdivisions;
@@ -509,7 +509,7 @@ typedef struct {
     int w;
     int h;
     int c;
-    float *data;
+    float *data;         // 使用一维数组存储图片数据？？
 } image;
 
 typedef struct{
@@ -533,11 +533,11 @@ typedef struct matrix{
 
 typedef struct{
     int w, h;
-    matrix X;
+    matrix X;           // matrix 自定义结构体，行、列、二维指针
     matrix y;
     int shallow;
     int *num_boxes;
-    box **boxes;
+    box **boxes;       // box的左上角坐标及长宽
 } data;
 
 typedef enum {
@@ -590,7 +590,7 @@ load_args get_base_args(network *net);
 void free_data(data d);
 
 typedef struct node{
-    void *val;
+    void *val;          // 定义为空类型，则可以指向任何类型
     struct node *next;
     struct node *prev;
 } node;

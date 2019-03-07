@@ -664,10 +664,14 @@ char **get_labels(char *filename)
 
 void free_data(data d)
 {
+    // shallow ??
     if(!d.shallow){
+        // 位于matrix.c 内部同样是调用free
         free_matrix(d.X);
         free_matrix(d.y);
     }else{
+        // free(): 释放由 malloc()、calloc()、realloc()分配的内存空间
+        // 以便其他程序再次使用
         free(d.X.vals);
         free(d.y.vals);
     }
@@ -1087,6 +1091,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
     return d;
 }
 
+// 线程函数，加载训练数据
 void *load_thread(void *ptr)
 {
     //printf("Loading data: %d\n", rand());
@@ -1134,9 +1139,12 @@ void *load_thread(void *ptr)
 
 pthread_t load_data_in_thread(load_args args)
 {
+    // 线程句柄
     pthread_t thread;
     struct load_args *ptr = calloc(1, sizeof(struct load_args));
     *ptr = args;
+    // 创建一个线程
+    // 线程标识符指针、线程属性、线程运行函数的起始地址、线程运行函数的参数
     if(pthread_create(&thread, 0, load_thread, ptr)) error("Thread creation failed");
     return thread;
 }
@@ -1682,4 +1690,3 @@ data *split_data(data d, int part, int total)
     split[1] = test;
     return split;
 }
-

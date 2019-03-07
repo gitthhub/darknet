@@ -184,6 +184,7 @@ convolutional_layer parse_convolutional(list *options, size_params params)
     int pad = option_find_int_quiet(options, "pad",0);
     int padding = option_find_int_quiet(options, "padding",0);
     int groups = option_find_int_quiet(options, "groups", 1);
+    // pad 决定是否填补，若填补，则设置padding，使输出size=输入size
     if(pad) padding = size/2;
 
     char *activation_s = option_find_str(options, "activation", "logistic");
@@ -740,21 +741,34 @@ int is_network(section *s)
 }
 
 // 该函数是具体的解析网络cfg文件的函数！！
+// .cfg文件中， [key1] -> [key2] -> ... 形成一个链表，表示基本的网络结构
+//           每个[key]下的配置以键值对链表的形式形成当前节点的一个分支链
 network *parse_network_cfg(char *filename)
 {
-    // 以链表的形式存储网络的各个层
+    // 以链表的形式存储网络的各个层的配置
     list *sections = read_cfg(filename);
+    // section->front中存储的是[net]标签下的section
     node *n = sections->front;
     if(!n) error("Config file has no sections");
+    // section->size：.cfg文件中[]的个数，即网络总层数+[net]
+    // make_network：申请相应的内存空间
+    // 这里的net变量将由当前函数返回，成为整个网络的ID
     network *net = make_network(sections->size - 1);
+    // gpu的设置由命令行给出   但是这里的gpu_index从哪里初始化？
     net->gpu_index = gpu_index;
-    size_params params;
 
+    // node的val参数原本是void *类型，强制转换为section *类型
     section *s = (section *)n->val;
+    // 获取[net]标签下的list，该list指向net的参数链表
     list *options = s->options;
+    // .cfg中第一部分必须为对整个网络的配置
     if(!is_network(s)) error("First section must be [net] or [network]");
+    // 在[net]标签的list(options)下，通过键值对找到.cfg中已配置的变量，并赋值给网络
+    // .cfg中没有进行配置的，则使用默认值
     parse_net_options(options, net);
 
+    //
+    size_params params;
     params.h = net->h;
     params.w = net->w;
     params.c = net->c;
@@ -764,8 +778,10 @@ network *parse_network_cfg(char *filename)
     params.net = net;
 
     size_t workspace_size = 0;
+    // layer1
     n = n->next;
     int count = 0;
+    // 释放掉存储[net]参数的section所占的内存
     free_section(s);
     fprintf(stderr, "layer     filters    size              input                output\n");
     // 读取链表  逐层配置网络
@@ -773,10 +789,13 @@ network *parse_network_cfg(char *filename)
         params.index = count;
         fprintf(stderr, "%5d ", count);
         s = (section *)n->val;
+        // 当前layer对应的list
         options = s->options;
+        // layer类型数组 初始化为0
         layer l = {0};
         LAYER_TYPE lt = string_to_layer_type(s->type);
         if(lt == CONVOLUTIONAL){
+            // 解析出当前conv层的配置参数，然后调用相应的make函数来构建该层
             l = parse_convolutional(options, params);
         }else if(lt == DECONVOLUTIONAL){
             l = parse_deconvolutional(options, params);
@@ -840,6 +859,8 @@ network *parse_network_cfg(char *filename)
         }else{
             fprintf(stderr, "Type not recognized: %s\n", s->type);
         }
+
+        // 当前layer所对应的其他一些参数，若.cfg文件中没有配置，则设为默认值
         l.clip = net->clip;
         l.truth = option_find_int_quiet(options, "truth", 0);
         l.onlyforward = option_find_int_quiet(options, "onlyforward", 0);
@@ -851,18 +872,23 @@ network *parse_network_cfg(char *filename)
         l.learning_rate_scale = option_find_float_quiet(options, "learning_rate", 1);
         l.smooth = option_find_float_quiet(options, "smooth", 0);
         option_unused(options);
+        // 当前层配置完成后，将其索引存入net的layers数组中
         net->layers[count] = l;
         if (l.workspace_size > workspace_size) workspace_size = l.workspace_size;
         free_section(s);
+
+        // 继续下一层的配置
         n = n->next;
         ++count;
         if(n){
+            // 将上一层输出的shape传递到下一层
             params.h = l.out_h;
             params.w = l.out_w;
             params.c = l.out_c;
             params.inputs = l.outputs;
         }
     }
+    // 以上结束网络的构建
     free_list(sections);
     layer out = get_network_output_layer(net);
     net->outputs = out.outputs;
@@ -897,13 +923,21 @@ list *read_cfg(char *filename)
     if(file == 0) file_error(filename);
     char *line;
     int nu = 0;
+    // 申请一个链表节点，并返回其的指针
     list *options = make_list();
+    // typedef struct{
+    //     char *type;       字符串类型，保存.cfg文件中[]中的字段
+    //     list *options;    链表节点指针，
+    // }section;
+    // 注意：这里并未申请内存空间
     section *current = 0;
     while((line=fgetl(file)) != 0){
         ++ nu;
+        // 没查到这里strip的用法，删除line中的空白符？？？
         strip(line);
         switch(line[0]){
             case '[':
+                //
                 current = malloc(sizeof(section));
                 list_insert(options, current);
                 current->options = make_list();

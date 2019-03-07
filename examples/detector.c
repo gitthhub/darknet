@@ -5,14 +5,16 @@ static int coco_ids[] = {1,2,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,22,2
 
 void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear)
 {
-    // 训练数据
+    // 解析.data文件，返回一个链表，链表各节点存储.data文件中的配置信息(key, value)
     list *options = read_data_cfg(datacfg);
+    // 在配置文件中找'train'字段，若没找到，则使用默认值
     char *train_images = option_find_str(options, "train", "data/train.list");
     char *backup_directory = option_find_str(options, "backup", "/backup/");
 
     srand(time(0));
 
     // 解析出文件名，如 yolo.cfg
+    // 为什么不直接 fopen()进行操作？
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
     float avg_loss = -1;
@@ -26,7 +28,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
 #ifdef GPU
         cuda_set_device(gpus[i]);
 #endif
-        // 加载网络
+        // 构建网络并加载相应参数
+        // clear参数？？
         nets[i] = load_network(cfgfile, weightfile, clear);
         nets[i]->learning_rate *= ngpus;
     }
@@ -118,7 +121,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         printf("Loaded: %lf seconds\n", what_time_is_it_now()-time);
 
         time=what_time_is_it_now();
-        // 进行训练
+        // 进行训练： 获取一个batch，前传获取loss，反传更新网络
         float loss = 0;
 #ifdef GPU
         if(ngpus == 1){

@@ -4,19 +4,22 @@ char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "c
 
 void train_yolo(char *cfgfile, char *weightfile)
 {
-    char *train_images = "/data/voc/train.txt";
+    char *train_images = "/data/voc/train.txt";             // 默认使用voc数据集进行训练
     char *backup_directory = "/home/pjreddie/backup/";
     srand(time(0));
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
     float avg_loss = -1;
+    // 解析.cfg文件，并构建相应网络，完成参数初始化等工作
+    // clear=0 -> net->seen = 0
     network *net = load_network(cfgfile, weightfile, 0);
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
     int imgs = net->batch*net->subdivisions;
-    int i = *net->seen/imgs;
+    int i = *net->seen/imgs;  // i=0
     data train, buffer;
 
 
+    // 获取输出层索引
     layer l = net->layers[net->n - 1];
 
     int side = l.side;
@@ -27,31 +30,48 @@ void train_yolo(char *cfgfile, char *weightfile)
     //int N = plist->size;
     char **paths = (char **)list_to_array(plist);
 
+    // 用于加载数据的参数结构体
     load_args args = {0};
     args.w = net->w;
     args.h = net->h;
     args.paths = paths;
-    args.n = imgs;
+    args.n = imgs;                      // net->batch*net->subdivisions
     args.m = plist->size;
     args.classes = classes;
     args.jitter = jitter;
     args.num_boxes = side;
     args.d = &buffer;
-    args.type = REGION_DATA;
+    args.type = REGION_DATA;            // 数据类型
 
-    args.angle = net->angle;
+    args.angle = net->angle;            // 图像增强参数
     args.exposure = net->exposure;
     args.saturation = net->saturation;
     args.hue = net->hue;
 
+    // 分配一个线程，用于加载数据
     pthread_t load_thread = load_data_in_thread(args);
+    // clock_t: 用来保存时间的数据类型
     clock_t time;
     //while(i*imgs < N*120){
+    // get_current_batch：batch_num = seen/(batch*subdivisions)
+    // 每次循环，seen += batch
+    // 相当于，每循环subdivisions(16)次，batch_num增加1
+    // 则总的循环次数为：batch*subdivisions * max_batches
+    // 也即每次的batch*subdivisions才算是一个真正的batch，完成这个batch后才会更新网络参数
     while(get_current_batch(net) < net->max_batches){
         i += 1;
+        // clock()返回程序从开始运行到当前位置所用的时间
+        // 再次调用clock()，与当前时间点做差，即可得到当前程序段的运行时间
         time=clock();
+        // 等待load_thread线程结束
         pthread_join(load_thread, 0);
         train = buffer;
+        // load_data_in_thread()
+        // while
+        //    pthread_join()
+        //    load_data_in_thread()
+        // 对以上的理解：pthread_join()是在等待上一个进程结束
+        // 在将其加载的数据赋值给train后，又开启下一个进程去加载数据，同时执行下面的训练操作
         load_thread = load_data_in_thread(args);
 
         printf("Loaded: %lf seconds\n", sec(clock()-time));
