@@ -188,6 +188,8 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             boxes[i].h = 999999;
             continue;
         }
+        // 修正后的box的上下左右边界的位置(根据相应的比例放缩和平移)
+        // 此时这些值都是实际的像素位置值，不是0-1
         boxes[i].left   = boxes[i].left  * sx - dx;
         boxes[i].right  = boxes[i].right * sx - dx;
         boxes[i].top    = boxes[i].top   * sy - dy;
@@ -198,7 +200,14 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             boxes[i].left = 1. - boxes[i].right;
             boxes[i].right = 1. - swap;
         }
-
+        /*
+        float constrain(float min, float max, float a)
+        {
+            if (a < min) return min;
+            if (a > max) return max;
+            return a;
+        }*/
+        // 按照constrain的写法，这四个值基本不是0就是1了 ？？？
         boxes[i].left =  constrain(0, 1, boxes[i].left);
         boxes[i].right = constrain(0, 1, boxes[i].right);
         boxes[i].top =   constrain(0, 1, boxes[i].top);
@@ -255,6 +264,8 @@ void fill_truth_swag(char *path, float *truth, int classes, int flip, float dx, 
 void fill_truth_region(char *path, float *truth, int classes, int num_boxes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
+    // 前面代码中没有体现直接读取label的操作
+    // 这里把image替换为labels，并把.jpg替换为.txt，对应的就是labels的路径
     find_replace(path, "images", "labels", labelpath);
     find_replace(labelpath, "JPEGImages", "labels", labelpath);
 
@@ -263,8 +274,12 @@ void fill_truth_region(char *path, float *truth, int classes, int num_boxes, int
     find_replace(labelpath, ".JPG", ".txt", labelpath);
     find_replace(labelpath, ".JPEG", ".txt", labelpath);
     int count = 0;
+    // 从.txt中读取当前图像的label值，count记录框的个数
     box_label *boxes = read_boxes(labelpath, &count);
+    // 把框随机排序
     randomize_boxes(boxes, count);
+    // correct_boxes：把框在原始图像下的坐标转到修剪后图像下的坐标
+    // 这里同时将w和h转换成了相对整幅图像的比例[0, 1], x,y也限制在[0, 1]
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
     float x,y,w,h;
     int id;
@@ -277,21 +292,34 @@ void fill_truth_region(char *path, float *truth, int classes, int num_boxes, int
         h =  boxes[i].h;
         id = boxes[i].id;
 
+        // 修剪后，太小的框不再作为正样本
         if (w < .005 || h < .005) continue;
 
+        // 这里x的值为0~1之间（不一定能取到0和1，因为图像被修剪过了，坐标的范围也变了）
+        // num_boxes=7，这里想表达的意思是使用box的x和y位置来推定当前box属于哪个grid cell
+        // 所以col和row都应是0~6之间的整数
+        // 但根据correct_boxes中的运算，好像并不是这样？？
         int col = (int)(x*num_boxes);
         int row = (int)(y*num_boxes);
 
+        // x和y再次变为0-1之间的数
         x = x*num_boxes - col;
         y = y*num_boxes - row;
 
+        // 通过框的x,y坐标算出的col和row
+        // 这里col+row*num_boxes相当于是索引到了第几个grid cell
+        // 每个grid cell又占用(5+classes)个坑位
+        // 所以index相当于是当前grid cell所属的坑位
         int index = (col+row*num_boxes)*(5+classes);
+        // 若第i个框落入index网格，则相应置信度赋值为1，若已经有框落入，则忽略当前box
+        // 由此可看出，每个框最多检测一个物体
+        // truth 即 d.y.vals[i]
         if (truth[index]) continue;
         truth[index++] = 1;
-
+        // 然后根据标签信息，将对应的类别处赋值为1
         if (id < classes) truth[index+id] = 1;
         index += classes;
-
+        // 再将框的x,y,w,h赋值到truth
         truth[index++] = x;
         truth[index++] = y;
         truth[index++] = w;
@@ -866,51 +894,68 @@ data load_data_mask(int n, char **paths, int m, int w, int h, int classes, int b
     return d;
 }
 
+// 形参的值为yolo.c中 load_args args局部变量的值
+// 获取n幅图像，及图像对应的box label，这些box label都被对应到相应图像的7*7的Grid Cell上
 data load_data_region(int n, char **paths, int m, int w, int h, int size, int classes, float jitter, float hue, float saturation, float exposure)
 {
+    // 随机获取n幅图像(的路径)
     char **random_paths = get_random_paths(paths, n, m);
     int i;
     data d = {0};
     d.shallow = 0;
 
+    // batch * subdivisions  一次加载到内存中的图像数量
     d.X.rows = n;
+    // 给X分配内存
+    // 从这里可以看出，图像数据是按照一维数据进行存储
     d.X.vals = calloc(d.X.rows, sizeof(float*));
     d.X.cols = h*w*3;
 
-
+    // 给y分配内存，共分配了n*k个float类型的内存块(n*k的矩阵)
+    // 对每幅图像，分配的内存区域为 k=7*7*(5+20)
+    // 也即对每幅图像的7*7=49个格点，每个格点最多存储一个box的标签信息
     int k = size*size*(5+classes);
     d.y = make_matrix(n, k);
     for(i = 0; i < n; ++i){
+        // 读取图像
         image orig = load_image_color(random_paths[i], 0, 0);
 
         int oh = orig.h;
         int ow = orig.w;
 
+        // 抖动参数 类似corp
         int dw = (ow*jitter);
         int dh = (oh*jitter);
 
+        // rand_uniform生成(-dw, dw)的一个随机数
         int pleft  = rand_uniform(-dw, dw);
         int pright = rand_uniform(-dw, dw);
         int ptop   = rand_uniform(-dh, dh);
         int pbot   = rand_uniform(-dh, dh);
-
+        // 裁剪完之后图像的宽和高
         int swidth =  ow - pleft - pright;
         int sheight = oh - ptop - pbot;
-
+        // 裁剪后和裁剪前图像的宽度比和高度比
         float sx = (float)swidth  / ow;
         float sy = (float)sheight / oh;
-
+        // 是否翻转图像
         int flip = rand()%2;
+        // 执行裁剪
         image cropped = crop_image(orig, pleft, ptop, swidth, sheight);
 
         float dx = ((float)pleft/ow)/sx;
         float dy = ((float)ptop /oh)/sy;
 
+        // 将裁剪后的图像resize到448*448
         image sized = resize_image(cropped, w, h);
+        // 翻转图像
         if(flip) flip_image(sized);
+        // 其他图像增强操作
         random_distort_image(sized, hue, saturation, exposure);
+        // 将生成好的图像存入d.X
         d.X.vals[i] = sized.data;
 
+        // 开始准备d.y  注意是对一幅图像的操作
         fill_truth_region(random_paths[i], d.y.vals[i], classes, size, flip, dx, dy, 1./sx, 1./sy);
 
         free_image(orig);
@@ -1117,6 +1162,7 @@ void *load_thread(void *ptr)
     } else if (a.type == SEGMENTATION_DATA){
         *a.d = load_data_seg(a.n, a.paths, a.m, a.w, a.h, a.classes, a.min, a.max, a.angle, a.aspect, a.hue, a.saturation, a.exposure, a.scale);
     } else if (a.type == REGION_DATA){
+        // 使用voc训练时，data类型为REGION_DATA
         *a.d = load_data_region(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
     } else if (a.type == DETECTION_DATA){
         *a.d = load_data_detection(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
@@ -1464,11 +1510,14 @@ void get_random_batch(data d, int n, float *X, float *y)
     }
 }
 
+// get_next_batch(d, batch, i*batch, net->input, net->truth);
 void get_next_batch(data d, int n, int offset, float *X, float *y)
 {
     int j;
     for(j = 0; j < n; ++j){
+        // offset表示当前是第几个batch，j表示是当前batch的第几个图像
         int index = offset + j;
+        // dest <- src  从缓冲区data中将数据拷贝到net->input中
         memcpy(X+j*d.X.cols, d.X.vals[index], d.X.cols*sizeof(float));
         if(y) memcpy(y+j*d.y.cols, d.y.vals[index], d.y.cols*sizeof(float));
     }
