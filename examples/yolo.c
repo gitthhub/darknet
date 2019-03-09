@@ -14,14 +14,17 @@ void train_yolo(char *cfgfile, char *weightfile)
     // clear=0 -> net->seen = 0
     network *net = load_network(cfgfile, weightfile, 0);
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
+    // imgs:一次加载到内存中的图像数量
+    // 在训练时，则是每次使用一个小的batch的图像
     int imgs = net->batch*net->subdivisions;
-    int i = *net->seen/imgs;  // i=0
+    // seen: 已经经过网络训练的图片数量 -> i 相当于是已经训练多少次
+    int i = *net->seen/imgs;
     data train, buffer;
 
 
     // 获取输出层索引
     layer l = net->layers[net->n - 1];
-
+    // 论文中的7  7*7 Grid
     int side = l.side;
     int classes = l.classes;
     float jitter = l.jitter;
@@ -35,15 +38,19 @@ void train_yolo(char *cfgfile, char *weightfile)
     args.w = net->w;
     args.h = net->h;
     args.paths = paths;
-    args.n = imgs;                      // net->batch*net->subdivisions
+    // 一次加载到内存中的图像数量
+    args.n = imgs;
+    // 训练图片的总数量
     args.m = plist->size;
     args.classes = classes;
     args.jitter = jitter;
+    // 7*7 个网格 ？？
     args.num_boxes = side;
     args.d = &buffer;
     args.type = REGION_DATA;            // 数据类型
 
-    args.angle = net->angle;            // 图像增强参数
+    // 图像增强参数
+    args.angle = net->angle;
     args.exposure = net->exposure;
     args.saturation = net->saturation;
     args.hue = net->hue;

@@ -9,4 +9,4 @@ For questions or issues please use the [Google Group](https://groups.google.com/
 
 
 # 2018.12.7
-Personal annotation to learn yolo.
+添加一些个人注释。

@@ -509,7 +509,7 @@ typedef struct {
     int w;
     int h;
     int c;
-    float *data;         // 使用一维数组存储图片数据？？
+    float *data;         // 使用一维数组存储图片数据
 } image;
 
 typedef struct{
@@ -525,6 +525,9 @@ typedef struct detection{
     int sort_class;
 } detection;
 
+// rows: 一次加载到内存中的样本的个数(batch*subdivisions)
+// clos: 样本维度
+// vals: 样本的值
 typedef struct matrix{
     int rows, cols;
     float **vals;
@@ -533,8 +536,8 @@ typedef struct matrix{
 
 typedef struct{
     int w, h;
-    matrix X;           // matrix 自定义结构体，行、列、二维指针
-    matrix y;
+    matrix X;          // 输入图像数据，使用一维数组存储
+    matrix y;          // ground truth (label)
     int shallow;
     int *num_boxes;
     box **boxes;       // box的左上角坐标及长宽
@@ -578,9 +581,9 @@ typedef struct load_args{
 } load_args;
 
 typedef struct{
-    int id;
-    float x,y,w,h;
-    float left, right, top, bottom;
+    int id;                             // 物体类别标签
+    float x,y,w,h;                      // 框的中心位置和宽高
+    float left, right, top, bottom;     // 框的上下左右边界的位置
 } box_label;
 
 

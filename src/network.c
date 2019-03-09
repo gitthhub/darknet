@@ -301,7 +301,7 @@ float train_network_datum(network *net)
     forward_network(net);
     backward_network(net);           // 反向传播的时候没有更新权重？？
     float error = *net->cost;
-    // 当 seen = batch * subdivisions 时， 更新网络
+    // 一次加载到内存中的图像(batch*subdivisions)训练完成后，更新网络
     if(((*net->seen)/net->batch)%net->subdivisions == 0) update_network(net);
     return error;
 }
@@ -324,12 +324,14 @@ float train_network(network *net, data d)
 {
     assert(d.X.rows % net->batch == 0);
     int batch = net->batch;
-    int n = d.X.rows / batch;   // 需要研究如何读取图像数据
+    // rows: 一次加载到内存中的样本的个数(batch*subdivisions)
+    // -> n实际上就是subdivision，表示加载一次数据可以训练几次
+    int n = d.X.rows / batch;
 
     int i;
     float sum = 0;
     for(i = 0; i < n; ++i){
-        // 与sgd区别
+        // 完成数据拷贝，从d到 net->input 和 net->truth
         get_next_batch(d, batch, i*batch, net->input, net->truth);
         float err = train_network_datum(net);
         sum += err;
