@@ -299,9 +299,9 @@ float train_network_datum(network *net)
     *net->seen += net->batch;
     net->train = 1;
     forward_network(net);
-    backward_network(net);           // 反向传播的时候没有更新权重？？
+    backward_network(net);           // 反向传播更新权重
     float error = *net->cost;
-    // 一次加载到内存中的图像(batch*subdivisions)训练完成后，更新网络
+    // 这里的update_network更新的是各层的学习率、动量等参数，而不是权重
     if(((*net->seen)/net->batch)%net->subdivisions == 0) update_network(net);
     return error;
 }
@@ -332,6 +332,8 @@ float train_network(network *net, data d)
     float sum = 0;
     for(i = 0; i < n; ++i){
         // 完成数据拷贝，从d到 net->input 和 net->truth
+        // net->input存储当前batch的训练图像
+        // net->truth存储当前batch的box信息
         get_next_batch(d, batch, i*batch, net->input, net->truth);
         float err = train_network_datum(net);
         sum += err;

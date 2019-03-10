@@ -30,7 +30,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
 #endif
         // 构建网络并加载相应参数
         // clear参数决定net->seen，seen是指网络训练的轮数
-        // 即，clear指是否从零开始计数
+        // 即clear指是否从零开始计数
         nets[i] = load_network(cfgfile, weightfile, clear);
         nets[i]->learning_rate *= ngpus;
     }
@@ -54,11 +54,11 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.coords = l.coords;
     args.paths = paths;
     args.n = imgs;
-    args.m = plist->size;
+    args.m = plist->size;           // 训练集图片个数
     args.classes = classes;
     args.jitter = jitter;
-    args.num_boxes = l.max_boxes;   // 限制一幅图像中box的个数
-    args.d = &buffer;
+    args.num_boxes = l.max_boxes;   // 限制一幅图像中box的个数  程序中写死 30个  该参数设置也没用
+    args.d = &buffer;               // 存储加载到内存中的图像数据和box数据
     args.type = DETECTION_DATA;
     //args.type = INSTANCE_DATA;
     args.threads = 64;
@@ -72,7 +72,9 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         // 加载一个batch的数据并进行预处理
         if(l.random && count++%10 == 0){
             printf("Resizing\n");
+            // 320-608  每隔10个epoch改变一次
             int dim = (rand() % 10 + 10) * 32;
+            // 最后200个epoch，按最大尺寸进行训练
             if (get_current_batch(net)+200 > net->max_batches) dim = 608;
             //int dim = (rand() % 4 + 16) * 32;
             printf("%d\n", dim);
@@ -86,6 +88,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
 
             #pragma omp parallel for
             for(i = 0; i < ngpus; ++i){
+                // 根据当前训练批次的输入图片大小，重新调整网络大小
+                // 使用c语言realloc函数，重新分配内存(保留原参数)
                 resize_network(nets[i], dim, dim);
             }
             net = nets[0];

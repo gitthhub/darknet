@@ -16,13 +16,13 @@ layer make_yolo_layer(int batch, int w, int h, int n, int total, int *mask, int 
     layer l = {0};
     l.type = YOLO;
 
-    l.n = n;              // 这里是mask的个数 3
-    l.total = total;      // total是总的anchor box的个数  9
+    l.n = n;                    // 这里是mask的个数 3
+    l.total = total;            // total是总的anchor box的个数  9
     l.batch = batch;
-    l.h = h;
+    l.h = h;                    // 上一层输出的shape
     l.w = w;
-    l.c = n*(classes + 4 + 1);
-    l.out_w = l.w;
+    l.c = n*(classes + 4 + 1);  // 三个独立的box的预测参数
+    l.out_w = l.w;              // 对yolo层，输入shape=输出shape
     l.out_h = l.h;
     l.out_c = l.c;
     l.classes = classes;
@@ -40,7 +40,7 @@ layer make_yolo_layer(int batch, int w, int h, int n, int total, int *mask, int 
     l.inputs = l.outputs;
     l.truths = 90*(4 + 1);
     l.delta = calloc(batch*l.outputs, sizeof(float));
-    l.output = calloc(batch*l.outputs, sizeof(float));
+    l.output = calloc(batch*l.outputs, sizeof(float));  // l.output的shape：w,h和原始图像的w,h相同，每个像素点后对应三个独立的box的预测参数
     for(i = 0; i < total*2; ++i){
         l.biases[i] = .5;
     }
@@ -79,7 +79,15 @@ void resize_yolo_layer(layer *l, int w, int h)
     l->output_gpu =    cuda_make_array(l->output, l->batch*l->outputs);
 #endif
 }
-
+// (l.output, l.biases, l.mask[n], box_index, i, j, l.w, l.h, net.w, net.h, l.w*l.h)
+// x: yolo层的feature map
+// biases: 存储.cfg中定义的anchor box的长宽
+// n: .cfg中定义的第几个anchor box
+// index: feature map中的第几个box
+// (i, j): feature map中格点位置
+// lw, lh: feature map的长宽
+// w, h: 网络输入图像的长宽
+// stride: feature map的格点总数
 box get_yolo_box(float *x, float *biases, int n, int index, int i, int j, int lw, int lh, int w, int h, int stride)
 {
     box b;
@@ -122,6 +130,7 @@ void delta_yolo_class(float *output, float *delta, int index, int class, int cla
     }
 }
 
+// entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
 static int entry_index(layer l, int batch, int location, int entry)
 {
     int n =   location / (l.w*l.h);
@@ -129,9 +138,15 @@ static int entry_index(layer l, int batch, int location, int entry)
     return batch*l.outputs + n*l.w*l.h*(4+l.classes+1) + entry*l.w*l.h + loc;
 }
 
+// net->input存储当前batch的训练图像
+// net->truth存储当前batch的box信息
+// forward_network()中，net.input被赋值为上一层的输出
 void forward_yolo_layer(const layer l, network net)
 {
     int i,j,b,t,n;
+    // 对yolo_layer,其实应该算不上一层，仅仅是将网络最终输出的信息与truth box信息进行比较后计算loss
+    // 所以对yolo_layer的feature map, input=output
+    // w*h*n*(classes + 5)  w*h为特征图尺寸，n*(classes+5)是n个box的预测信息
     memcpy(l.output, net.input, l.outputs*l.batch*sizeof(float));
 
 #ifndef GPU
@@ -169,6 +184,8 @@ void forward_yolo_layer(const layer l, network net)
                 for (n = 0; n < l.n; ++n) {
                     // 获取第n个anchor box的信息
                     int box_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
+                    // 得到的box坐标是相对当前feature map的比例
+                    // box的长宽是相对原图像的比例
                     box pred = get_yolo_box(l.output, l.biases, l.mask[n], box_index, i, j, l.w, l.h, net.w, net.h, l.w*l.h);
                     float best_iou = 0;
                     int best_t = 0;
@@ -177,6 +194,7 @@ void forward_yolo_layer(const layer l, network net)
                     for(t = 0; t < l.max_boxes; ++t){
                         box truth = float_to_box(net.truth + t*(4 + 1) + b*l.truths, 1);
                         if(!truth.x) break;
+                        // 两个box的(x,y)，一个是相对当前feature map的，一个是相对于原图的 ？？
                         float iou = box_iou(pred, truth);
                         if (iou > best_iou) {
                             best_iou = iou;
@@ -226,6 +244,7 @@ void forward_yolo_layer(const layer l, network net)
             // 挑选出与当前truth box的iou最大的anchor box
             for(n = 0; n < l.total; ++n){
                 box pred = {0};
+                // 将anchor box的信息转化为相对原图的比例
                 pred.w = l.biases[2*n]/net.w;
                 pred.h = l.biases[2*n+1]/net.h;
                 float iou = box_iou(pred, truth_shift);

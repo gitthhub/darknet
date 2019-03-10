@@ -381,7 +381,8 @@ void resize_convolutional_layer(convolutional_layer *l, int w, int h)
 
     l->outputs = l->out_h * l->out_w * l->out_c;
     l->inputs = l->w * l->h * l->c;
-
+    // 如果是扩大内存操作，会把 ptr 指向的内存中的数据复制到新地址
+    // 如果是缩小内存操作，原始据会被复制并截取新长度
     l->output = realloc(l->output, l->batch*l->outputs*sizeof(float));
     l->delta  = realloc(l->delta,  l->batch*l->outputs*sizeof(float));
     if(l->batch_normalize){

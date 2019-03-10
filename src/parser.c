@@ -768,7 +768,7 @@ network *parse_network_cfg(char *filename)
     // .cfg中没有进行配置的，则使用默认值
     parse_net_options(options, net);
 
-    //
+    // 整个网络的一些参数
     size_params params;
     params.h = net->h;
     params.w = net->w;
@@ -882,7 +882,7 @@ network *parse_network_cfg(char *filename)
         n = n->next;
         ++count;
         if(n){
-            // 将上一层输出的shape传递到下一层
+            // 将上一层输出的shape传递到下一层 !!!
             params.h = l.out_h;
             params.w = l.out_w;
             params.c = l.out_c;

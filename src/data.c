@@ -189,12 +189,14 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             continue;
         }
         // 修正后的box的上下左右边界的位置(根据相应的比例放缩和平移)
-        // 此时这些值都是实际的像素位置值，不是0-1
+        // sx, sy, dx, dy 都是比例参数
+        // 所以计算得到的新的box信息是相对图像左上角原点的比例信息
         boxes[i].left   = boxes[i].left  * sx - dx;
         boxes[i].right  = boxes[i].right * sx - dx;
         boxes[i].top    = boxes[i].top   * sy - dy;
         boxes[i].bottom = boxes[i].bottom* sy - dy;
 
+        // 上下翻转
         if(flip){
             float swap = boxes[i].left;
             boxes[i].left = 1. - boxes[i].right;
@@ -207,12 +209,13 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
             if (a > max) return max;
             return a;
         }*/
-        // 按照constrain的写法，这四个值基本不是0就是1了 ？？？
         boxes[i].left =  constrain(0, 1, boxes[i].left);
         boxes[i].right = constrain(0, 1, boxes[i].right);
         boxes[i].top =   constrain(0, 1, boxes[i].top);
         boxes[i].bottom =   constrain(0, 1, boxes[i].bottom);
 
+        // box的中心位置相对图像原点的偏移量
+        // box的宽和高相对原图像宽高的比例
         boxes[i].x = (boxes[i].left+boxes[i].right)/2;
         boxes[i].y = (boxes[i].top+boxes[i].bottom)/2;
         boxes[i].w = (boxes[i].right - boxes[i].left);
@@ -473,6 +476,8 @@ void fill_truth_mask(char *path, int num_boxes, float *truth, int classes, int w
 
 // num_boxes: l.max_boxes 默认为30
 // truth 即d.y.vals[i], 将要存储box信息的位置  对一幅图像， 1*(5*max_boxes)
+// dx,dy: x,y方向相对原图的偏移比例
+// sx,sy: 裁剪后图像尺寸相对原图的比例
 void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
@@ -487,7 +492,11 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
     int count = 0;
     // 读取当前图像的box信息，并计数
     box_label *boxes = read_boxes(labelpath, &count);
+    // 随机重排这些box
     randomize_boxes(boxes, count);
+    // 根据图像的裁剪和翻转参数，修正box的大小和位置
+    // 此时得到的box的x,y坐标是相对于图像左上角原点的比例
+    // box的w和h是相对于原图像宽和高的比例
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
     // 限制一幅图像中box的个数 最多为num_boxes (30) 个
     if(count > num_boxes) count = num_boxes;
@@ -503,11 +512,15 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
         h =  boxes[i].h;
         id = boxes[i].id;
 
+        // 宽和高较小的box，直接忽略
+        // 感觉这里和上面限制box个数的逻辑可以调整
+        // 可以在这个循环里计数可用的box个数，达到30或box遍历完后退出
         if ((w < .001 || h < .001)) {
             ++sub;
             continue;
         }
 
+        // truth中存储的是用于训练的box的信息
         truth[(i-sub)*5+0] = x;
         truth[(i-sub)*5+1] = y;
         truth[(i-sub)*5+2] = w;
@@ -1112,40 +1125,56 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
     // 所以虽然此处限制一幅图像最多30个box，yolov1可以达到49个box，但是yolov1中box的位置是受到限制的
     d.y = make_matrix(n, 5*boxes);
     for(i = 0; i < n; ++i){
+        // 加载图像数据，归一化到0-1，resize到w*h，同时转换为一维数组进行存储
+        // 按照yolo的grid策略，所有的输入图像的w应该等于h
         image orig = load_image_color(random_paths[i], 0, 0);
+        // 创建一幅空图像，大小为w*h*c
         image sized = make_image(w, h, orig.c);
+        // 使用0.5填充空图像
         fill_image(sized, .5);
 
+        // 根据抖动参数，计算出长和宽最大能偏移的量
         float dw = jitter * orig.w;
         float dh = jitter * orig.h;
 
+        // rand_uniform()产生一定范围内的随机数
+        // new_ar相当于抖动后的宽高比  原图的宽高比为 1
         float new_ar = (orig.w + rand_uniform(-dw, dw)) / (orig.h + rand_uniform(-dh, dh));
         //float scale = rand_uniform(.25, 2);
         float scale = 1;
 
         float nw, nh;
 
+        // 这里相当于是以变换后较长的一边为基准，把另一边相对缩小
         if(new_ar < 1){
             nh = scale * h;
             nw = nh * new_ar;
         } else {
-            nw = scale * w;
-            nh = nw / new_ar;
+            nw = scale * w;    // =w
+            nh = nw / new_ar;  // =w/new_ar  new_ar大于1 相当于是将h缩小
         }
 
+        // 原尺寸-抖动后的尺寸，相当于得到各方向的变化量
         float dx = rand_uniform(0, w - nw);
         float dy = rand_uniform(0, h - nh);
 
+        // 插值，得到新的sized图像  没涉及到的位置都为0.5
         place_image(orig, nw, nh, dx, dy, sized);
 
+        // 在hsv空间对图像进行变换，然后再变回rgb空间 像素值0-1
         random_distort_image(sized, hue, saturation, exposure);
 
+        // 是否翻转图像
         int flip = rand()%2;
         if(flip) flip_image(sized);
-        // 调整后的图片指针存入data结构体
+        // 调整后的图片存入data结构体  赋值的是data指针指向的一维数组区域
         d.X.vals[i] = sized.data;
 
-
+        // boxes:最大box个数
+        // x,y方向相对原图的偏移比例
+        // 裁剪后图像尺寸相对原图的比例
+        // y.vals(truth)中box信息的存储格式：
+        //  val[i]->第i张图像   -> val[i][box] ->  [box0(x,y,w,h,id)][box1][box2][box3]...
         fill_truth_detection(random_paths[i], boxes, d.y.vals[i], classes, flip, -dx/w, -dy/h, nw/w, nh/h);
 
         free_image(orig);

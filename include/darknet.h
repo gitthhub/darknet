@@ -509,7 +509,7 @@ typedef struct {
     int w;
     int h;
     int c;
-    float *data;         // 使用一维数组存储图片数据
+    float *data;         // 使用一维数组存储图片数据  make_image()函数中实际申请内存
 } image;
 
 typedef struct{
