@@ -581,7 +581,7 @@ typedef struct load_args{
 } load_args;
 
 typedef struct{
-    int id;                             // 物体类别标签
+    int id;                             // 目标类别id  由该id可转化出one-hot向量
     float x,y,w,h;                      // 框的中心位置和宽高
     float left, right, top, bottom;     // 框的上下左右边界的位置
 } box_label;

@@ -53,7 +53,6 @@ load_args get_base_args(network *net)
 // 加载网络：
 //    读取.cfg网络配置文件并实际构建网络
 //    给网络加载权重参数
-// clear: ???
 network *load_network(char *cfg, char *weights, int clear)
 {
     // 解析网络参数和各层的具体配置
@@ -63,6 +62,7 @@ network *load_network(char *cfg, char *weights, int clear)
         // 逐层加载网络参数(也可以指定只加载某些层)
         load_weights(net, weights);
     }
+    // net->seen：记录网络训练轮数
     if(clear) (*net->seen) = 0;
     return net;
 }

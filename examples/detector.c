@@ -29,7 +29,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         cuda_set_device(gpus[i]);
 #endif
         // 构建网络并加载相应参数
-        // clear参数？？
+        // clear参数决定net->seen，seen是指网络训练的轮数
+        // 即，clear指是否从零开始计数
         nets[i] = load_network(cfgfile, weightfile, clear);
         nets[i]->learning_rate *= ngpus;
     }
@@ -56,7 +57,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.m = plist->size;
     args.classes = classes;
     args.jitter = jitter;
-    args.num_boxes = l.max_boxes;
+    args.num_boxes = l.max_boxes;   // 限制一幅图像中box的个数
     args.d = &buffer;
     args.type = DETECTION_DATA;
     //args.type = INSTANCE_DATA;

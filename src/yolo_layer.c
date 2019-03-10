@@ -16,8 +16,8 @@ layer make_yolo_layer(int batch, int w, int h, int n, int total, int *mask, int 
     layer l = {0};
     l.type = YOLO;
 
-    l.n = n;
-    l.total = total;
+    l.n = n;              // 这里是mask的个数 3
+    l.total = total;      // total是总的anchor box的个数  9
     l.batch = batch;
     l.h = h;
     l.w = w;
@@ -145,6 +145,7 @@ void forward_yolo_layer(const layer l, network net)
     }
 #endif
 
+    // l.outputs = h*w*n*(classes + 4 + 1);  n为anchor box个数
     memset(l.delta, 0, l.outputs * l.batch * sizeof(float));
     if(!net.train) return;
     float avg_iou = 0;
@@ -156,14 +157,23 @@ void forward_yolo_layer(const layer l, network net)
     int count = 0;
     int class_count = 0;
     *(l.cost) = 0;
+    // 遍历每一幅图像
     for (b = 0; b < l.batch; ++b) {
+        // 遍历每幅图像输出层的每个格点对应的3个anchor box
+        // 通过与图像的truth box比较以判定是否有物体
+        // 以此计算不包含物体的box的confidence梯度
+        // 若包含物体且iou很大，则直接计算位置、类别等梯度
         for (j = 0; j < l.h; ++j) {
             for (i = 0; i < l.w; ++i) {
+                // 遍历当前格点对应的3个anchor box (当前层每个格点预测的box个数由mask确定)
                 for (n = 0; n < l.n; ++n) {
+                    // 获取第n个anchor box的信息
                     int box_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
                     box pred = get_yolo_box(l.output, l.biases, l.mask[n], box_index, i, j, l.w, l.h, net.w, net.h, l.w*l.h);
                     float best_iou = 0;
                     int best_t = 0;
+                    // 遍历当前图像的所有truth box，计算与当前anchor box的iou
+                    // 记录最大的iou及相应的truth box索引
                     for(t = 0; t < l.max_boxes; ++t){
                         box truth = float_to_box(net.truth + t*(4 + 1) + b*l.truths, 1);
                         if(!truth.x) break;
@@ -173,12 +183,19 @@ void forward_yolo_layer(const layer l, network net)
                             best_t = t;
                         }
                     }
+                    // 获取当前anchor box所预测的confidence参数
                     int obj_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 4);
                     avg_anyobj += l.output[obj_index];
+                    // 假设该anchor box中没有物体，计算confidence梯度
                     l.delta[obj_index] = 0 - l.output[obj_index];
+
+                    // 以下ignore_thresh和truth_thresh即为论文中所述的双阈值
+                    // 若当前anchor box与某一truth box的iou大于(用于判断是否存在物体的)阈值，则判定为有物体
+                    // 此时将前面假设没物体计算得到的confidence梯度置零
                     if (best_iou > l.ignore_thresh) {
                         l.delta[obj_index] = 0;
                     }
+                    // 若iou大于可以判断为真正存在物体，则直接计算box的类别误差和位置误差
                     if (best_iou > l.truth_thresh) {
                         l.delta[obj_index] = 1 - l.output[obj_index];
 
@@ -192,7 +209,10 @@ void forward_yolo_layer(const layer l, network net)
                 }
             }
         }
+
+        // 遍历当前图像的truth box
         for(t = 0; t < l.max_boxes; ++t){
+            // 获取第t个truth box
             box truth = float_to_box(net.truth + t*(4 + 1) + b*l.truths, 1);
 
             if(!truth.x) break;
@@ -202,6 +222,8 @@ void forward_yolo_layer(const layer l, network net)
             j = (truth.y * l.h);
             box truth_shift = truth;
             truth_shift.x = truth_shift.y = 0;
+            // 遍历9个anchor box
+            // 挑选出与当前truth box的iou最大的anchor box
             for(n = 0; n < l.total; ++n){
                 box pred = {0};
                 pred.w = l.biases[2*n]/net.w;
@@ -213,7 +235,11 @@ void forward_yolo_layer(const layer l, network net)
                 }
             }
 
+            // 判断通过上述for循环挑出的best_n box是否属于当前层mask所标记的anchor box中的
+            // 若是，则返回该best_n box在l.mask中的索引，若不是，则返回-1
             int mask_n = int_index(l.mask, best_n, l.n);
+            // 仅当best_n box属于当前层mask所标记的anchor box时才进行以下计算
+            // 所以上面的for循环为什么不直接遍历当前层所对应的anchor box，而是要遍历所有的anchor box？？
             if(mask_n >= 0){
                 int box_index = entry_index(l, b, mask_n*l.w*l.h + j*l.w + i, 0);
                 float iou = delta_yolo_box(truth, l.output, l.biases, best_n, box_index, i, j, l.w, l.h, net.w, net.h, l.delta, (2-truth.w*truth.h), l.w*l.h);
@@ -258,8 +284,8 @@ void correct_yolo_boxes(detection *dets, int n, int w, int h, int netw, int neth
     }
     for (i = 0; i < n; ++i){
         box b = dets[i].bbox;
-        b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw); 
-        b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth); 
+        b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw);
+        b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth);
         b.w *= (float)netw/new_w;
         b.h *= (float)neth/new_h;
         if(!relative){
@@ -371,4 +397,3 @@ void backward_yolo_layer_gpu(const layer l, network net)
     axpy_gpu(l.batch*l.inputs, 1, l.delta_gpu, 1, net.delta_gpu, 1);
 }
 #endif
-

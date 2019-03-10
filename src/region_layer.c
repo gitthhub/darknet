@@ -15,22 +15,22 @@ layer make_region_layer(int batch, int w, int h, int n, int classes, int coords)
     layer l = {0};
     l.type = REGION;
 
-    l.n = n;
+    l.n = n;            // anchors个数  论文中为5或9  这里为5
     l.batch = batch;
     l.h = h;
     l.w = w;
-    l.c = n*(classes + coords + 1);
-    l.out_w = l.w;
+    l.c = n*(classes + coords + 1);  // 输出层通道数   与读入的box label对应 ？
+    l.out_w = l.w;    // 13*13*(num*(classes+5)) ??
     l.out_h = l.h;
     l.out_c = l.c;
     l.classes = classes;
     l.coords = coords;
-    l.cost = calloc(1, sizeof(float));
-    l.biases = calloc(n*2, sizeof(float));
+    l.cost = calloc(1, sizeof(float));       // loss函数值
+    l.biases = calloc(n*2, sizeof(float));   // 存储.cfg中定义的anchors的参数，每个anchor box (w, h)
     l.bias_updates = calloc(n*2, sizeof(float));
-    l.outputs = h*w*n*(classes + coords + 1);
+    l.outputs = h*w*n*(classes + coords + 1); // 一张训练图片经过region_layer层后，输出元素个数
     l.inputs = l.outputs;
-    l.truths = 30*(l.coords + 1);
+    l.truths = 30*(l.coords + 1);             // 一张图片含有的truth box参数的个数
     l.delta = calloc(batch*l.outputs, sizeof(float));
     l.output = calloc(batch*l.outputs, sizeof(float));
     int i;
@@ -158,10 +158,17 @@ int entry_index(layer l, int batch, int location, int entry)
 void forward_region_layer(const layer l, network net)
 {
     int i,j,b,t,n;
+    // copy: l.output <- net.input
     memcpy(l.output, net.input, l.outputs*l.batch*sizeof(float));
 
+    // 默认参数：
+    // l.background = 0
+    // l.softmax_tree = 0
+    // l.softmax = 1
 #ifndef GPU
+    // b: 索引图像
     for (b = 0; b < l.batch; ++b){
+        // n: anchor的数量，也是每个格点预测box的数量
         for(n = 0; n < l.n; ++n){
             int index = entry_index(l, b, n*l.w*l.h, 0);
             activate_array(l.output + index, 2*l.w*l.h, LOGISTIC);
@@ -186,6 +193,7 @@ void forward_region_layer(const layer l, network net)
 #endif
 
     memset(l.delta, 0, l.outputs * l.batch * sizeof(float));
+    // 非训练阶段直接返回
     if(!net.train) return;
     float avg_iou = 0;
     float recall = 0;
@@ -195,6 +203,7 @@ void forward_region_layer(const layer l, network net)
     int count = 0;
     int class_count = 0;
     *(l.cost) = 0;
+    // 遍历一个batch的图像
     for (b = 0; b < l.batch; ++b) {
         if(l.softmax_tree){
             int onlyclass = 0;
@@ -229,28 +238,47 @@ void forward_region_layer(const layer l, network net)
             }
             if(onlyclass) continue;
         }
+        // 遍历当前层feature map中的每个格点所对应的5个anchor box
+        // 将每个anchor box与当前图像truth box计算iou
+        // 若最大的iou大于阈值，则判断当前anchor box中包含物体
+        // 由此可计算出所有box的confidence梯度，存入l.delta(有物体的box，梯度设为0)
         for (j = 0; j < l.h; ++j) {
             for (i = 0; i < l.w; ++i) {
+                // 每个格点对应的5个anchor box
                 for (n = 0; n < l.n; ++n) {
+                    // 预测得到的box的index
                     int box_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
+                    // 预测得到的box
                     box pred = get_region_box(l.output, l.biases, n, box_index, i, j, l.w, l.h, l.w*l.h);
                     float best_iou = 0;
+                    // 读取truth box  写死的，一张图片最多有30个
+                    // 这里相当于将当前格点对应的5个anchor box逐一与该图像的truth box进行比对，找出最大iou
+                    // (truth box反向计算有自己对应的格点)
                     for(t = 0; t < 30; ++t){
                         box truth = float_to_box(net.truth + t*(l.coords + 1) + b*l.truths, 1);
+                        // 遍历完box则跳出循环
                         if(!truth.x) break;
                         float iou = box_iou(pred, truth);
                         if (iou > best_iou) {
                             best_iou = iou;
                         }
                     }
+                    // 当前格点(i, j)的第n个anchor box预测的confidence 的index
                     int obj_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, l.coords);
+                    // 有目标的概率 ？？
                     avg_anyobj += l.output[obj_index];
+                    // 首先假设所有box中都没有物体，计算delta(和yolov1中的类似)
                     l.delta[obj_index] = l.noobject_scale * (0 - l.output[obj_index]);
+                    // l.background = 0
                     if(l.background) l.delta[obj_index] = l.noobject_scale * (1 - l.output[obj_index]);
+                    // iou大于阈值，则判断anchor box中有物体
+                    // 若判定当前格点(i, j)的第n个anchor box包含物体，则相应的confidence的梯度设为0
                     if (best_iou > l.thresh) {
                         l.delta[obj_index] = 0;
                     }
 
+                    // 当训练轮数小于12800时  计算没有出现物体的box的iou损失，权重0.01
+                    // 相当于仅在训练初期使用，使模型更加稳定 ？？？
                     if(*(net.seen) < 12800){
                         box truth = {0};
                         truth.x = (i + .5)/l.w;
@@ -262,20 +290,34 @@ void forward_region_layer(const layer l, network net)
                 }
             }
         }
+
+        // 遍历当前图像的truth box
         for(t = 0; t < 30; ++t){
+            // 获取第t个truth box
             box truth = float_to_box(net.truth + t*(l.coords + 1) + b*l.truths, 1);
 
             if(!truth.x) break;
             float best_iou = 0;
             int best_n = 0;
+            // 计算该truth所在格点的坐标(i,j)
             i = (truth.x * l.w);
             j = (truth.y * l.h);
             box truth_shift = truth;
+            // 将truth box中心移动到(0, 0)
             truth_shift.x = 0;
             truth_shift.y = 0;
+            // 遍历当前truth box所在的格点(i, j)所对应的5个anchor box
+            // 在当前格点(i, j)所对应的5个anchor box中选择一个与当前truth box的iou最大的anchor box用于box的回归计算
             for(n = 0; n < l.n; ++n){
+                // 预测得到的bounding box的index
                 int box_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
+                // 预测得到的bounding box
                 box pred = get_region_box(l.output, l.biases, n, box_index, i, j, l.w, l.h, l.w*l.h);
+                /*   ???
+                注意：bias_match标志位（cfg中设置）用来确定由anchor还是anchor对应的prediction来确定用哪个anchor产生的prediction来回归
+                如果bias_match=1，则先用anchor box与truth box的iou来选择每个cell使用哪个anchor的预测框计算损失。
+                如果bias_match=0，则使用每个anchor的预测框与truth box的iou选择使用哪一个anchor的预测框计算损失。
+                */
                 if(l.bias_match){
                     pred.w = l.biases[2*n]/l.w;
                     pred.h = l.biases[2*n+1]/l.h;
@@ -285,37 +327,51 @@ void forward_region_layer(const layer l, network net)
                 float iou = box_iou(pred, truth_shift);
                 if (iou > best_iou){
                     best_iou = iou;
+                    // 最大iou对应的anchor box索引
                     best_n = n;
                 }
             }
 
+            // 根据best_n找到的anchor box的index
             int box_index = entry_index(l, b, best_n*l.w*l.h + j*l.w + i, 0);
+            // 计算预测box和真实box的iou  相当于计算了两个box的坐标误差
+            // 包含论文中所述的 Direct location predition 貌似没有用logistic？
             float iou = delta_region_box(truth, l.output, l.biases, best_n, box_index, i, j, l.w, l.h, l.delta, l.coord_scale *  (2 - truth.w*truth.h), l.w*l.h);
+            // l.coords=4 所以这里不执行
             if(l.coords > 4){
                 int mask_index = entry_index(l, b, best_n*l.w*l.h + j*l.w + i, 4);
                 delta_region_mask(net.truth + t*(l.coords + 1) + b*l.truths + 5, l.output, l.coords - 4, mask_index, l.delta, l.w*l.h, l.mask_scale);
             }
+            // 大于阈值，则认为找到目标，召回数+1
             if(iou > .5) recall += 1;
             avg_iou += iou;
 
+            // anchor box的confidence的索引
+            // 这里计算的是所有有物体的box的confidence梯度
             int obj_index = entry_index(l, b, best_n*l.w*l.h + j*l.w + i, l.coords);
             avg_obj += l.output[obj_index];
             l.delta[obj_index] = l.object_scale * (1 - l.output[obj_index]);
+            // l.rescore=1
             if (l.rescore) {
                 l.delta[obj_index] = l.object_scale * (iou - l.output[obj_index]);
             }
+            // l.background=0
             if(l.background){
                 l.delta[obj_index] = l.object_scale * (0 - l.output[obj_index]);
             }
-
+            // 真实类别
             int class = net.truth[t*(l.coords + 1) + b*l.truths + l.coords];
+            // l.map = 0
             if (l.map) class = l.map[class];
             int class_index = entry_index(l, b, best_n*l.w*l.h + j*l.w + i, l.coords + 1);
+            // 计算class的梯度
             delta_region_class(l.output, l.delta, class_index, class, l.classes, l.softmax_tree, l.class_scale, l.w*l.h, &avg_cat, !l.softmax);
             ++count;
             ++class_count;
         }
     }
+    // l.delta中包含class/confidence/x/y/w/h的梯度
+    // 计算平方和后开方，然后求平方，相当于是平方和损失
     *(l.cost) = pow(mag_array(l.delta, l.outputs * l.batch), 2);
     printf("Region Avg IOU: %f, Class: %f, Obj: %f, No Obj: %f, Avg Recall: %f,  count: %d\n", avg_iou/count, avg_cat/class_count, avg_obj/count, avg_anyobj/(l.w*l.h*l.n*l.batch), recall/count, count);
 }
@@ -347,8 +403,8 @@ void correct_region_boxes(detection *dets, int n, int w, int h, int netw, int ne
     }
     for (i = 0; i < n; ++i){
         box b = dets[i].bbox;
-        b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw); 
-        b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth); 
+        b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw);
+        b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth);
         b.w *= (float)netw/new_w;
         b.h *= (float)neth/new_h;
         if(!relative){
@@ -504,4 +560,3 @@ void zero_objectness(layer l)
         }
     }
 }
-

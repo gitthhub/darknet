@@ -394,6 +394,7 @@ layer parse_region(list *options, size_params params)
         for(i = 0; i < len; ++i){
             if (a[i] == ',') ++n;
         }
+        // n=10
         for(i = 0; i < n; ++i){
             float bias = atof(a);
             l.biases[i] = bias;

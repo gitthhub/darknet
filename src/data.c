@@ -471,7 +471,8 @@ void fill_truth_mask(char *path, int num_boxes, float *truth, int classes, int w
     free_image(part);
 }
 
-
+// num_boxes: l.max_boxes 默认为30
+// truth 即d.y.vals[i], 将要存储box信息的位置  对一幅图像， 1*(5*max_boxes)
 void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
@@ -484,9 +485,11 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
     find_replace(labelpath, ".JPG", ".txt", labelpath);
     find_replace(labelpath, ".JPEG", ".txt", labelpath);
     int count = 0;
+    // 读取当前图像的box信息，并计数
     box_label *boxes = read_boxes(labelpath, &count);
     randomize_boxes(boxes, count);
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
+    // 限制一幅图像中box的个数 最多为num_boxes (30) 个
     if(count > num_boxes) count = num_boxes;
     float x,y,w,h;
     int id;
@@ -509,7 +512,7 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
         truth[(i-sub)*5+1] = y;
         truth[(i-sub)*5+2] = w;
         truth[(i-sub)*5+3] = h;
-        truth[(i-sub)*5+4] = id;
+        truth[(i-sub)*5+4] = id;    // 物体类别标签，在yolov1中，加载数据时，该标签直接转换为了one-hot向量
     }
     free(boxes);
 }
@@ -907,7 +910,7 @@ data load_data_region(int n, char **paths, int m, int w, int h, int size, int cl
     // batch * subdivisions  一次加载到内存中的图像数量
     d.X.rows = n;
     // 给X分配内存
-    // 从这里可以看出，图像数据是按照一维数据进行存储
+    // 从这里可以看出，图像数据是按照一维数据进行存储，存储的是指针
     d.X.vals = calloc(d.X.rows, sizeof(float*));
     d.X.cols = h*w*3;
 
@@ -1082,6 +1085,12 @@ data load_data_swag(char **paths, int n, int classes, float jitter)
     return d;
 }
 
+// n: 要加载的图像数量 batch * subdivisions
+// m: 训练图像总个数
+// w,h: 图像尺寸
+// boxes：l.max_boxes，在读取cfg文件逐层配置网络时，设置的默认参数为30
+//        从读取图像标注信息的操作中可看出，l.max_boxes的作用是限制一幅图像中box的个数
+// classes: 类别数
 data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, int classes, float jitter, float hue, float saturation, float exposure)
 {
     char **random_paths = get_random_paths(paths, n, m);
@@ -1090,9 +1099,17 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
     d.shallow = 0;
 
     d.X.rows = n;
+    // 按行存储n幅图像，存储的仅仅是图像的指针
     d.X.vals = calloc(d.X.rows, sizeof(float*));
     d.X.cols = h*w*3;
 
+    // 5表示box的参数(x,y,w,h,id)  30表示限定一幅图像最多有30个box
+    // 每个box分别存储了相应的位置和类别信息
+    // 这里和yolov1有很大区别 k = size*size*(5+classes) -> 7*7*(5+20)
+    // yolov1中，首先将box位置映射到7*7的格点上，若多个box映射到同一格点，则仅保留一个
+    // 5表示box的参数(x,y,w,h)和当前格点是否已被box占用，20表示根据id转换得到的one-hot向量
+    // 这里也就是论文中说的，使用anchor box后，类别预测和空间位置解耦合
+    // 所以虽然此处限制一幅图像最多30个box，yolov1可以达到49个box，但是yolov1中box的位置是受到限制的
     d.y = make_matrix(n, 5*boxes);
     for(i = 0; i < n; ++i){
         image orig = load_image_color(random_paths[i], 0, 0);
@@ -1125,6 +1142,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
 
         int flip = rand()%2;
         if(flip) flip_image(sized);
+        // 调整后的图片指针存入data结构体
         d.X.vals[i] = sized.data;
 
 
@@ -1162,9 +1180,10 @@ void *load_thread(void *ptr)
     } else if (a.type == SEGMENTATION_DATA){
         *a.d = load_data_seg(a.n, a.paths, a.m, a.w, a.h, a.classes, a.min, a.max, a.angle, a.aspect, a.hue, a.saturation, a.exposure, a.scale);
     } else if (a.type == REGION_DATA){
-        // 使用voc训练时，data类型为REGION_DATA
+        // 通过yolo.c时，由此进入数据加载(yolov1)
         *a.d = load_data_region(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
     } else if (a.type == DETECTION_DATA){
+        // 通过detector.c时，由此进入数据加载(yolov2,yolov3)
         *a.d = load_data_detection(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
     } else if (a.type == SWAG_DATA){
         *a.d = load_data_swag(a.paths, a.n, a.classes, a.jitter);
