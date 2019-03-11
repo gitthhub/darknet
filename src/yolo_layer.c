@@ -84,10 +84,14 @@ void resize_yolo_layer(layer *l, int w, int h)
 // biases: 存储.cfg中定义的anchor box的长宽
 // n: .cfg中定义的第几个anchor box
 // index: feature map中的第几个box
-// (i, j): feature map中格点位置
+// (i, j): feature map中格点位置      相当于公式中的cx和cy
 // lw, lh: feature map的长宽
 // w, h: 网络输入图像的长宽
 // stride: feature map的格点总数
+
+// 要清楚：x[]索引得到的是网络给出的box的预测参数
+// 网络不是直接预测框的实际位置和宽高，所以求解之后需要一步转换
+// 该公式就是yolov2论文中的公式，只是这里都进行了归一化
 box get_yolo_box(float *x, float *biases, int n, int index, int i, int j, int lw, int lh, int w, int h, int stride)
 {
     box b;
@@ -103,6 +107,10 @@ float delta_yolo_box(box truth, float *x, float *biases, int n, int index, int i
     box pred = get_yolo_box(x, biases, n, index, i, j, lw, lh, w, h, stride);
     float iou = box_iou(pred, truth);
 
+    // truth box的参数
+    // 该过程刚好和get_yolo_box()中的过程相反
+    // 对truth box的参数进行一次转换，然后再与预测值求梯度
+    // 所以预测值预测出的参数自然也是经过转换后的box的参数
     float tx = (truth.x*lw - i);
     float ty = (truth.y*lh - j);
     float tw = log(truth.w*w / biases[2*n]);
@@ -124,6 +132,7 @@ void delta_yolo_class(float *output, float *delta, int index, int class, int cla
         if(avg_cat) *avg_cat += output[index + stride*class];
         return;
     }
+    // yolov3论文中说是交叉熵损失？？？
     for(n = 0; n < classes; ++n){
         delta[index + stride*n] = ((n == class)?1 : 0) - output[index + stride*n];
         if(n == class && avg_cat) *avg_cat += output[index + stride*n];
@@ -131,8 +140,10 @@ void delta_yolo_class(float *output, float *delta, int index, int class, int cla
 }
 
 // entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
+// location: 格点的位置信息
 static int entry_index(layer l, int batch, int location, int entry)
 {
+    //
     int n =   location / (l.w*l.h);
     int loc = location % (l.w*l.h);
     return batch*l.outputs + n*l.w*l.h*(4+l.classes+1) + entry*l.w*l.h + loc;
@@ -150,11 +161,14 @@ void forward_yolo_layer(const layer l, network net)
     memcpy(l.output, net.input, l.outputs*l.batch*sizeof(float));
 
 #ifndef GPU
+    // 遍历图像
     for (b = 0; b < l.batch; ++b){
         for(n = 0; n < l.n; ++n){
             int index = entry_index(l, b, n*l.w*l.h, 0);
-            activate_array(l.output + index, 2*l.w*l.h, LOGISTIC);
+            // 如论文中公式所述，使用logistic激活网络对box的x,y的预测值
+            activate_array(l.output + index, 2*l.w*l.h, LOGISTIC);   // 1./(1. + exp(-x))
             index = entry_index(l, b, n*l.w*l.h, 4);
+            // //用logistic激活(conf,C1,C2,C3...)   如yolov3论文中所述  用的都是logistic(sigmoid)
             activate_array(l.output + index, (1+l.classes)*l.w*l.h, LOGISTIC);
         }
     }
@@ -358,6 +372,7 @@ void avg_flipped_yolo(layer l)
     }
 }
 
+// 获取网络的预测结果
 int get_yolo_detections(layer l, int w, int h, int netw, int neth, float thresh, int *map, int relative, detection *dets)
 {
     int i,j,n;
