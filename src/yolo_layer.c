@@ -274,6 +274,7 @@ void forward_yolo_layer(const layer l, network net)
             // 仅当best_n box属于当前层mask所标记的anchor box时才进行以下计算
             // 所以上面的for循环为什么不直接遍历当前层所对应的anchor box，而是要遍历所有的anchor box？？
             if(mask_n >= 0){
+                // 获取与当前truth box的iou最大的anchor box在特征图中的索引(哪个格点的第几个box)
                 int box_index = entry_index(l, b, mask_n*l.w*l.h + j*l.w + i, 0);
                 float iou = delta_yolo_box(truth, l.output, l.biases, best_n, box_index, i, j, l.w, l.h, net.w, net.h, l.delta, (2-truth.w*truth.h), l.w*l.h);
 
