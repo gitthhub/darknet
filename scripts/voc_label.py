@@ -4,10 +4,13 @@ import os
 from os import listdir, getcwd
 from os.path import join
 
-sets=[('2012', 'train'), ('2012', 'val'), ('2007', 'train'), ('2007', 'val'), ('2007', 'test')]
+sets=[('2007', 'trainval'), ('2007', 'test'), ('2012', 'trainval')]
+# sets=[('Person', 'train'), ('Person', 'val'), ('Person', 'test')]
 
 classes = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
+# classes = ["person"]
 
+path = '/home/vhpg/MountDisk'
 
 def convert(size, box):
     dw = 1./(size[0])
@@ -22,9 +25,9 @@ def convert(size, box):
     h = h*dh
     return (x,y,w,h)
 
-def convert_annotation(year, image_id):
-    in_file = open('VOCdevkit/VOC%s/Annotations/%s.xml'%(year, image_id))
-    out_file = open('VOCdevkit/VOC%s/labels/%s.txt'%(year, image_id), 'w')
+def convert_annotation(year, image_set, image_id):
+    in_file = open(path+'/VOC%s/VOC%s_%s/Annotations/%s.xml'%(year, year, image_set, image_id))
+    out_file = open(path+'/VOC%s/VOC%s_%s/labels/%s.txt'%(year, year, image_set, image_id), 'w')
     tree=ET.parse(in_file)
     root = tree.getroot()
     size = root.find('size')
@@ -32,9 +35,9 @@ def convert_annotation(year, image_id):
     h = int(size.find('height').text)
 
     for obj in root.iter('object'):
-        difficult = obj.find('difficult').text
+        # difficult = obj.find('difficult').text
         cls = obj.find('name').text
-        if cls not in classes or int(difficult)==1:
+        if cls not in classes: # or int(difficult)==1:
             continue
         cls_id = classes.index(cls)
         xmlbox = obj.find('bndbox')
@@ -45,15 +48,15 @@ def convert_annotation(year, image_id):
 wd = getcwd()
 
 for year, image_set in sets:
-    if not os.path.exists('VOCdevkit/VOC%s/labels/'%(year)):
-        os.makedirs('VOCdevkit/VOC%s/labels/'%(year))
-    image_ids = open('VOCdevkit/VOC%s/ImageSets/Main/%s.txt'%(year, image_set)).read().strip().split()
-    list_file = open('%s_%s.txt'%(year, image_set), 'w')
+    if not os.path.exists(path+'/VOC%s/VOC%s_%s/labels/'%(year, year, image_set)):
+        os.makedirs(path+'/VOC%s/VOC%s_%s/labels/'%(year, year, image_set))
+    image_ids = open(path+'/VOC%s/VOC%s_%s/ImageSets/Main/%s.txt'%(year, year, image_set, image_set)).read().strip().split()
+    list_file = open('VOC%s_%s.txt'%(year, image_set), 'w')
     for image_id in image_ids:
-        list_file.write('%s/VOCdevkit/VOC%s/JPEGImages/%s.jpg\n'%(wd, year, image_id))
-        convert_annotation(year, image_id)
+        list_file.write(path+'/VOC%s/VOC%s_%s/JPEGImages/%s.jpg\n'%(year, year, image_set, image_id))
+        convert_annotation(year, image_set, image_id)
     list_file.close()
 
-os.system("cat 2007_train.txt 2007_val.txt 2012_train.txt 2012_val.txt > train.txt")
-os.system("cat 2007_train.txt 2007_val.txt 2007_test.txt 2012_train.txt 2012_val.txt > train.all.txt")
-
+# os.system("cat VOCPerson_train.txt VOCPerson_val.txt > VOCPerson_trainval.txt")
+# os.system("cat 2007_train.txt 2007_val.txt 2012_train.txt 2012_val.txt > train.txt")
+# os.system("cat 2007_train.txt 2007_val.txt 2007_test.txt 2012_train.txt 2012_val.txt > train.all.txt")

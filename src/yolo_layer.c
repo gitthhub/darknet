@@ -296,7 +296,22 @@ void forward_yolo_layer(const layer l, network net)
         }
     }
     *(l.cost) = pow(mag_array(l.delta, l.outputs * l.batch), 2);
+    // net.index: 当前yolo层所在的层号
+    // Avg IOU: 当前mini-batch的图像在该yolo层的平均IOU(预测框与真实框)
+    // Class: 物体分类正确率
+    // Obj:
+    // .5R: IOU阈值为0.5情况下的召回率
+    // count: 当前mini-batch图片中包含正样本的数量
     printf("Region %d Avg IOU: %f, Class: %f, Obj: %f, No Obj: %f, .5R: %f, .75R: %f,  count: %d\n", net.index, avg_iou/count, avg_cat/class_count, avg_obj/count, avg_anyobj/(l.w*l.h*l.n*l.batch), recall/count, recall75/count, count);
+    FILE *fp = fopen("./backup/train_log_2.txt", "a+");
+    if(fp==NULL)
+    {
+      printf("train_log_2.txt open failed!\n");
+    }
+    else{
+      fprintf(fp, "%f,%f,%f,%f,%f,%f,%d\n", avg_iou/count, avg_cat/class_count, avg_obj/count, avg_anyobj/(l.w*l.h*l.n*l.batch), recall/count, recall75/count, count);
+    }
+    fclose(fp);
 }
 
 void backward_yolo_layer(const layer l, network net)

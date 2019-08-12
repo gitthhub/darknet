@@ -14,7 +14,6 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     srand(time(0));
 
     // 解析出文件名，如 yolo.cfg
-    // 为什么不直接 fopen()进行操作？
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
     float avg_loss = -1;
@@ -71,13 +70,13 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     while(get_current_batch(net) < net->max_batches){
         // 加载一个batch的数据并进行预处理
         if(l.random && count++%10 == 0){
-            printf("Resizing\n");
+            // printf("Resizing\n");
             // 320-608  每隔10个epoch改变一次
             int dim = (rand() % 10 + 10) * 32;
             // 最后200个epoch，按最大尺寸进行训练
             if (get_current_batch(net)+200 > net->max_batches) dim = 608;
             //int dim = (rand() % 4 + 16) * 32;
-            printf("%d\n", dim);
+            printf("Resizing %d\n", dim);
             args.w = dim;
             args.h = dim;
 
@@ -123,26 +122,38 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
            }
          */
 
-        printf("Loaded: %lf seconds\n", what_time_is_it_now()-time);
+        // printf("Loaded: %lf seconds\n", what_time_is_it_now()-time);
 
         time=what_time_is_it_now();
         // 进行训练： 获取一个batch，前传获取loss，反传更新网络
         float loss = 0;
 #ifdef GPU
+        // printf("Using GPU to train.\n");
         if(ngpus == 1){
             loss = train_network(net, train);
         } else {
             loss = train_networks(nets, ngpus, train, 4);
         }
 #else
+        // printf("Using CPU to train.\n");
         loss = train_network(net, train);
 #endif
         if (avg_loss < 0) avg_loss = loss;
         avg_loss = avg_loss*.9 + loss*.1;
 
         i = get_current_batch(net);
-        printf("%ld: %f, %f avg, %f rate, %lf seconds, %d images\n", get_current_batch(net), loss, avg_loss, get_current_rate(net), what_time_is_it_now()-time, i*imgs);
-        if(i%100==0){
+        // printf("%ld: %f, %f avg, %f rate, %lf seconds, %d images\n", get_current_batch(net), loss, avg_loss, get_current_rate(net), what_time_is_it_now()-time, i*imgs);
+        printf("batch=%ld,  loss=%f,  avg_loss=%f,  lr=%f,  time=%lf,  img=%d\n", get_current_batch(net), loss, avg_loss, get_current_rate(net), what_time_is_it_now()-time, i*imgs);
+        FILE *fp = fopen("./backup/train_log_1.txt", "a+");
+        if(fp==NULL)
+        {
+          printf("train_log_1.txt open failed!\n");
+        }
+        else{
+          fprintf(fp, "%ld,%f,%f,%f\n", get_current_batch(net), loss, avg_loss, get_current_rate(net));
+        }
+        fclose(fp);
+        if(i%1000==0){
 #ifdef GPU
             if(ngpus != 1) sync_nets(nets, ngpus, 0);
 #endif
@@ -150,12 +161,12 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
             sprintf(buff, "%s/%s.backup", backup_directory, base);
             save_weights(net, buff);
         }
-        if(i%10000==0 || (i < 1000 && i%100 == 0)){
+        if(i%500==0 || (i < 1000 && i%100 == 0)){
 #ifdef GPU
             if(ngpus != 1) sync_nets(nets, ngpus, 0);
 #endif
             char buff[256];
-            sprintf(buff, "%s/%s_%d.weights", backup_directory, base, i);
+            sprintf(buff, "%s/%s_%d_avgloss%.2f.weights", backup_directory, base, i, avg_loss);
             save_weights(net, buff);
         }
         free_data(train);
@@ -431,7 +442,7 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     int i=0;
     int t;
 
-    float thresh = .005;
+    float thresh = .01;
     float nms = .45;
 
     int nthreads = 4;
